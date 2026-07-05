@@ -245,10 +245,9 @@ def _identify(files):
     return songs, attrs, wems, dds
 
 
-def convert(psarc_path, out_path=None, *, keep_dir=False):
-    psarc_path = Path(psarc_path)
-    print(f"Reading {psarc_path.name}")
-    songs, attrs, wems, dds = _identify(read_psarc(psarc_path))
+def convert_song(name, stems, songs, attrs, wems, dds, out_path, *, keep_dir=False):
+    """Convert a single song to feedpak format."""
+    print(f"Converting {name}...")
 
     playable, vocals, meta_attrs = [], None, None
     for stem, song in songs.items():
@@ -266,7 +265,7 @@ def convert(psarc_path, out_path=None, *, keep_dir=False):
     meta_attrs = meta_attrs or {}
 
     meta = {
-        "title": meta_attrs.get("SongName", psarc_path.stem),
+        "title": meta_attrs.get("SongName", name),
         "artist": meta_attrs.get("ArtistName", "Unknown Artist"),
         "album": meta_attrs.get("AlbumName"),
         "year": meta_attrs.get("SongYear"),
@@ -274,10 +273,7 @@ def convert(psarc_path, out_path=None, *, keep_dir=False):
                           or playable[0][1].metadata.songLength),
     }
 
-    if out_path is None:
-        safe = "".join(c if c.isalnum() or c in " -_'" else "_"
-                       for c in f"{meta['artist']} - {meta['title']}").strip()
-        out_path = psarc_path.with_name(f"{safe}.feedpak")
+    
     out_path = Path(out_path)
 
     build = Path(str(out_path) + ".build")
@@ -371,4 +367,40 @@ def convert(psarc_path, out_path=None, *, keep_dir=False):
         shutil.rmtree(build)
 
     print(f"Wrote {out_path}")
-    return out_path
+
+
+def convert(psarc_path, out_path=None, *, keep_dir=False):
+    psarc_path = Path(psarc_path)
+    print(f"Reading {psarc_path.name}")
+    songs, attrs, wems, dds = _identify(read_psarc(psarc_path))
+
+    names = {}
+
+    for stem, song in songs.items():
+        name = stem.rsplit("_", 1)[0]
+        obj = names.get(name, {"songs": {}, "attrs": {}, "stems": []})
+        obj["songs"][stem] = song
+        if stem not in obj["stems"]:
+            obj["stems"].append(stem)
+        names[name] = obj
+    for stem, attr in attrs.items():
+        name = stem.rsplit("_", 1)[0]
+        obj = names.get(name, {"songs": {}, "attrs": {}, "stems": []})
+        obj["attrs"][stem] = attr
+        if stem not in obj["stems"]:
+            obj["stems"].append(stem)
+        names[name] = obj
+
+    if out_path is not None and len(names) > 1:
+        raise SystemExit("cannot specify a single output path for multiple songs")
+    for name, obj in names.items():
+        songs, attrs, stems = obj["songs"], obj["attrs"], obj["stems"]
+        if not songs:
+            print(f"  {name}: no playable arrangements")
+            continue
+
+        if len(names) > 1:
+            out_path = psarc_path.with_name(f"{name}.feedpak")
+
+        convert_song(name, stems, songs, attrs, wems, dds, out_path=out_path, keep_dir=keep_dir)
+
