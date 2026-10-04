@@ -201,6 +201,8 @@ class App:
         btns.pack(fill="x", padx=16)
         ttk.Button(btns, text="Add .psarc files", command=self.pick_files
                    ).pack(side="left")
+        ttk.Button(btns, text="Add folder", command=self.pick_folder
+                   ).pack(side="left", padx=(8, 0))
         ttk.Button(btns, text="Remove selected", command=self.remove_selected
                    ).pack(side="left", padx=(8, 0))
         ttk.Button(btns, text="Clear", command=self.clear_files
@@ -411,6 +413,17 @@ class App:
         picked = filedialog.askopenfilenames(
             title="Choose Rocksmith .psarc files",
             filetypes=[("Rocksmith CDLC", "*.psarc"), ("All files", "*.*")])
+        self._add_paths(picked)
+
+    def pick_folder(self):
+        d = filedialog.askdirectory(title="Choose a folder with .psarc files")
+        if d:
+            # Whole tree, any depth; case-insensitive extension match.
+            self._add_paths(sorted(f.as_posix() for f in Path(d).rglob("*")
+                                   if f.is_file()
+                                   and f.suffix.lower() == ".psarc"))
+
+    def _add_paths(self, picked):
         for p in picked:
             if p not in self.paths:
                 self.paths.append(p)
