@@ -238,6 +238,10 @@ class App:
         self.convert_btn = ttk.Button(bottom, text="Convert", state="disabled",
                                       style="Accent.TButton", command=self.start)
         self.convert_btn.pack(side="right")
+        self.stop_btn = ttk.Button(bottom, text="Stop", state="disabled",
+                                   command=self.stop)
+        self.stop_btn.pack(side="right", padx=(0, 8))
+        self.stop_event = threading.Event()
         self.status = ttk.Label(bottom, text="Ready", style="Status.TLabel")
         self.status.pack(side="left")
 
@@ -450,6 +454,8 @@ class App:
             return
         self.busy = True
         self.convert_btn.config(state="disabled")
+        self.stop_event.clear()
+        self.stop_btn.config(state="normal")
         self.status.config(text="Converting…", style="Status.TLabel")
         self.progress.config(maximum=len(self.paths), value=0)
         files = list(self.paths)
@@ -458,9 +464,18 @@ class App:
         threading.Thread(target=self._work, args=(files, out, self.options),
                          daemon=True).start()
 
+    def stop(self):
+        # Takes effect between files; the one in progress finishes first.
+        self.stop_event.set()
+        self.stop_btn.config(state="disabled")
+        self.status.config(text="Stopping after the current file…")
+
     def _work(self, files, outdir, options):
         ok = 0
         for i, src in enumerate(files, 1):
+            if self.stop_event.is_set():
+                self.msgs.put(("log", "\nStopped.\n"))
+                break
             src = Path(src)
             self.msgs.put(("progress", (i - 1, len(files))))
             self.msgs.put(("log", f"\n[{i}/{len(files)}] {src.name}\n"))
@@ -489,6 +504,7 @@ class App:
                     self.status.config(text=f"Converting {done + 1} of {total}…")
                 elif kind == "done":
                     self.busy = False
+                    self.stop_btn.config(state="disabled")
                     self.progress.config(value=self.progress["maximum"])
                     self.status.config(text=payload, style="Done.TLabel")
                     self._refresh_count()
