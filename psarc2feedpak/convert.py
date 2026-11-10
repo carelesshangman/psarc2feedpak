@@ -324,7 +324,9 @@ def _identify(files):
             for entry in entries.values():
                 if entry.get("Attributes"):
                     attrs[Path(name).stem] = entry["Attributes"]
-    wems = sorted((blob for n, blob in files.items() if n.endswith(".wem")),
+    # Skip empty wems: some packs ship a 0-byte preview, which would fail the
+    # whole conversion instead of just leaving the song without a preview.
+    wems = sorted((blob for n, blob in files.items() if n.endswith(".wem") and blob),
                   key=len, reverse=True)
     dds = [files[n] for n in sorted(files, reverse=True) if n.endswith(".dds")]
     return songs, attrs, wems, dds
@@ -519,7 +521,7 @@ def _bank_wems(files, bank_name):
     if bank is None:
         return []
     refs = [blob for n, blob in files.items()
-            if n.endswith(".wem") and Path(n).stem.isdigit()
+            if n.endswith(".wem") and blob and Path(n).stem.isdigit()
             and int(Path(n).stem).to_bytes(4, "little") in bank]
     return sorted(refs, key=len, reverse=True)
 
