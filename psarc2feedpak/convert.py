@@ -330,6 +330,37 @@ def _identify(files):
     return songs, attrs, wems, dds
 
 
+_GUITAR_OPEN = [40, 45, 50, 55, 59, 64]          # E2 A2 D3 G3 B3 E4 (MIDI)
+_BASS6_OPEN = [23, 28, 33, 38, 43, 48]          # B0 E1 A1 D2 G2 C3
+
+
+def _bass_on_guitar(attrs, name):
+    """5- and 6-string bass parts are charted on a guitar track (Rocksmith has
+    only 4-string bass and 6-string guitar), an octave down: CentOffset -1200,
+    e.g. [-5, -5, -5, -5, -4, -4] sounds B0 E1 A1 D2 G2 C3. Return the six
+    strings' sounding MIDI pitches and the leftover cents for such a part, or
+    None. The test: a non-bass track at least an octave down whose low string
+    sounds below E1, lower than any guitar's."""
+    tuning = attrs.get("Tuning")
+    cents = float(attrs.get("CentOffset") or 0)
+    if "bass" in name.lower() or not tuning or cents > -1200:
+        return None
+    octaves = int(cents // 1200)
+    sounding = [g + int(tuning[f"string{i}"]) + 12 * octaves for i, g in enumerate(_GUITAR_OPEN)]
+    if sounding[0] >= 28:
+        return None
+    return sounding, cents - 1200 * octaves
+
+
+def _bass_tuning(sounding, arr):
+    """Offsets from a 5-string (B E A D G) or 6-string (B E A D G C) bass in
+    standard: 5 strings when the chart never plays the top string (its tuning
+    is then often a leftover value)."""
+    used = {n["s"] for n in arr["notes"]} | {cn["s"] for c in arr["chords"] for cn in c["notes"]}
+    n = 6 if 5 in used else 5
+    return [s - b for s, b in zip(sounding[:n], _BASS6_OPEN)]
+
+
 def convert_song(song_key, songs, attrs, wems, dds, out_path, out_dir, *,
                  keep_dir=False, options=None, log=print):
     """Convert a single song to feedpak format."""
@@ -397,7 +428,12 @@ def convert_song(song_key, songs, attrs, wems, dds, out_path, out_dir, *,
 
     manifest_arrs, timeline, extras = [], None, {}
     seen_ids = {}
-    for stem, song, a, name in playable:
+    # Bass parts found on guitar tracks become "Bass", after the song's own
+    # 4-string bass (that one keeps the plain name; these get "Bass 2", ...).
+    parts = [(stem, song, a, name, _bass_on_guitar(a, name)) for stem, song, a, name in playable]
+    parts = [(s, g, a, "Bass" if b else n, b) for s, g, a, n, b in parts]
+    parts.sort(key=lambda p: (_ARR_SORT.get(p[3].lower(), 9), p[4] is not None))
+    for stem, song, a, name, bass_part in parts:
         # CDLC can carry several arrangements with the same name (two "Lead"
         # charts, say); keep them all instead of overwriting one JSON file.
         arr_id = name.lower().replace(" ", "_")
@@ -409,6 +445,8 @@ def convert_song(song_key, songs, attrs, wems, dds, out_path, out_dir, *,
         tones = _tones(song, a)
         if tones:
             arr["tones"] = tones
+        if bass_part is not None:
+            arr["tuning"] = _bass_tuning(bass_part[0], arr)
         dump(arr, f"arrangements/{arr_id}.json")
 
         tuning = a.get("Tuning")
@@ -421,6 +459,13 @@ def convert_song(song_key, songs, attrs, wems, dds, out_path, out_dir, *,
         }
         if float(a.get("CentOffset") or 0):
             entry["centOffset"] = float(a["CentOffset"])
+        if bass_part is not None:
+            # Same pitches, written as the bass chart it is (see
+            # _bass_on_guitar); the octave drop is now in the bass base.
+            entry["tuning"], entry["type"] = arr["tuning"], "bass"
+            entry.pop("centOffset", None)
+            if bass_part[1]:
+                entry["centOffset"] = bass_part[1]
         manifest_arrs.append(entry)
         if timeline is None:
             timeline = _timeline(song)
